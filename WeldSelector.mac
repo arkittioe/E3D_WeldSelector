@@ -1,0 +1,173 @@
+-- تعریف آرایه‌ها
+!pipeList = ARRAY()
+!weldIndexList = ARRAY()
+!allSelectedWelds = ARRAY()
+
+-- لیست لاین‌ها و جوش‌ها برای هر pipe
+!pipeList[1] = '/8-WD-230127-S1A-HC(101A)'
+!weldIndexList[1] = '3,4,5,6'
+
+!pipeList[2] = '/8-WD-230126-S1A-HC(101A)'
+!weldIndexList[2] = '2,3,6,7,8,9,10,12,13'
+
+!pipeList[3] = '/6-WD-231605-S1A-P(101A)'
+!weldIndexList[3] = '1,2,3'
+
+!pipeList[4] = '/6-WD-231603-S1A-P(101A)'
+!weldIndexList[4] = '1,2,3,4,5,6,7,8,9,14,15,16,17,18,19,24,25,26,28,40,41,42,43,44,45,46'
+
+!pipeList[5] = '/8-SC-230601-D1D-HC(101A)'
+!weldIndexList[5] = '1,2,3,4,5,6,7,8,9,14,15,16,17,18,19,24,25,26,28'
+
+-- نوع المان‌ها برای جمع‌آوری
+!elementTypes = 'PIPE BRAN TUBI ELBOW BEND TEE FLAN OLET INST VALVE PCOMP FBLIND GASK TUBI REDU CAP COUP PLUG UNION ATTA WELD'
+
+-- شروع حلقه روی pipe‌ها
+DO !pipeIdx INDEX !pipeList
+
+  !pipeName = !pipeList[!pipeIdx]
+  if (!pipeName EQ ||) then
+    skip
+  endif
+
+  -- جمع آوری المان‌ها و جوش‌ها
+  !filterExpr = 'name of pipe eq |' & !pipeName & '|'
+  VAR !allElements collect all ($!elementTypes) with $!filterExpr
+  VAR !branchList collect all BRAN with $!filterExpr
+  VAR !weldList collect all WELDS FOR $!pipeName
+
+  $P ==== PIPE ====
+  Q VAR !pipeName
+
+  $P --- ELEMENTS ---
+  Q VAR !allElements
+
+  $P --- WELDS ---
+  Q VAR !weldList
+
+  -- تبدیل رشته ایندکس‌های جوش به آرایه عددی
+  !weldIDs = !weldIndexList[!pipeIdx].split(',')
+  !selectedWeldIndices = ARRAY()
+  DO !wIdx VALUES !weldIDs
+    !selectedWeldIndices.append(!wIdx.REAL())
+  ENDDO
+
+  -- آرایه نهایی برای المان‌های انتخاب شده
+  !finalSet = ARRAY()
+
+  -- بررسی اینکه آیا جوش اول انتخاب شده یا نه
+  !hasFirst = false
+  DO !i INDEX !selectedWeldIndices
+    if (!selectedWeldIndices[!i] EQ 1) then
+      !hasFirst = true
+      break
+    endif
+  ENDDO
+
+  -- بررسی اینکه آیا جوش آخر انتخاب شده یا نه
+  !lastIdx = !weldList.Size()
+  !hasLast = false
+  DO !i INDEX !selectedWeldIndices
+    if (!selectedWeldIndices[!i] EQ !lastIdx) then
+      !hasLast = true
+      break
+    endif
+  ENDDO
+
+  -- اگر جوش اول انتخاب شده
+  if (!hasFirst) then
+    !firstWeldName = !weldList[1]
+    !secondWeldName = !weldList[2]
+
+    !firstIdx = 0
+    !secondIdx = 0
+
+    DO !i INDEX !allElements
+      if (!allElements[!i] EQ !firstWeldName) then
+        !firstIdx = !i
+      endif
+      if (!allElements[!i] EQ !secondWeldName) then
+        !secondIdx = !i
+      endif
+    ENDDO
+
+    DO !i FROM 1 TO $!secondIdx
+      !finalSet.append(!allElements[!i])
+    ENDDO
+  endif
+
+  -- اگر جوش آخر انتخاب شده
+  if (!hasLast) then
+    !preLastWeldName = !weldList[$!lastIdx - 1]
+    !lastWeldName    = !weldList[$!lastIdx]
+
+    !startIdx = 0
+    !endIdx = 0
+
+    DO !i INDEX !allElements
+      if (!allElements[!i] EQ !preLastWeldName) then
+        !startIdx = !i
+      endif
+      if (!allElements[!i] EQ !lastWeldName) then
+        !endIdx = !i
+      endif
+    ENDDO
+
+    DO !i FROM $!startIdx TO !allElements.size()
+      !finalSet.append(!allElements[!i])
+    ENDDO
+  endif
+
+  -- بررسی جوش‌های وسط (نه اول، نه آخر)
+  DO !i INDEX !selectedWeldIndices
+    !currIdx = !selectedWeldIndices[!i]
+    if (!currIdx EQ 1 or !currIdx EQ !lastIdx) then
+      skip
+    endif
+
+    !prevWeld = !weldList[$!currIdx - 1]
+    !nextWeld = !weldList[$!currIdx + 1]
+
+    !startIdx = 0
+    !endIdx = 0
+
+    DO !j INDEX !allElements
+      if (!allElements[!j] EQ !prevWeld) then
+        !startIdx = !j
+      endif
+      if (!allElements[!j] EQ !nextWeld) then
+        !endIdx = !j
+      endif
+    ENDDO
+
+    DO !k FROM $!startIdx TO $!endIdx
+      !finalSet.append(!allElements[!k])
+    ENDDO
+  ENDDO
+
+  -- حذف تکراری‌ها
+  !finalSet = !finalSet.unique()
+
+  $P --- FINAL ELEMENTS ---
+  Q VAR !finalSet
+
+  -- حذف BRAN و PIPE و VALV از لیست نهایی برای رنگ
+  !ALL = ARRAY()
+  do !indx indices !finalSet
+    $!finalSet[$!indx]
+    if(TYPE neq |BRAN|) then
+      if(TYPE neq |PIPE|) then
+        if(TYPE neq |VALV|) then
+          !ALL.APPEND(!!ce.string())
+        endif
+      endif
+    endif
+  enddo
+
+  $P ++++++nis+++++++
+  q var !ALL
+
+  -- رنگ کردن المان‌ها
+  ENHANCE ALL FROM !ALL COLOUR 2
+
+ENDDO
